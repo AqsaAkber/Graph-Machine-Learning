@@ -1,0 +1,48 @@
+import networkx as nx
+import random
+from gensim.models import Word2Vec
+
+# Step 1: Create a Graph (or Load an Existing Graph)
+# For this example, let's use a small graph. You can replace it with your own graph.
+G = nx.erdos_renyi_graph(100, 0.05)  # Random graph with 100 nodes and 5% probability for edge creation
+
+# Step 2: Perform Random Walks to Generate Sequences of Nodes
+
+def random_walk(graph, start_node, walk_length=10):
+    """Performs a random walk starting from a node."""
+    walk = [start_node]
+    while len(walk) < walk_length:
+        current_node = walk[-1]
+        neighbors = list(graph.neighbors(current_node))
+        if neighbors:
+            walk.append(random.choice(neighbors))
+        else:
+            break
+    return walk
+
+def generate_walks(graph, num_walks=10, walk_length=10):
+    """Generates random walks from each node in the graph."""
+    walks = []
+    for node in graph.nodes():
+        for _ in range(num_walks):
+            walks.append(random_walk(graph, node, walk_length))
+    return walks
+
+# Step 3: Train Skip-Gram Model using Gensim (Word2Vec)
+def train_skipgram_model(walks, embedding_size=128, window_size=5, iter_count=5):
+    """Trains a Word2Vec Skip-Gram model using random walks."""
+    model = Word2Vec(sentences=walks, vector_size=embedding_size, window=window_size, sg=1, workers=4, epochs=iter_count)
+    return model
+
+# Generate random walks from the graph
+walks = generate_walks(G, num_walks=10, walk_length=10)
+
+# Train Skip-Gram model
+model = train_skipgram_model(walks, embedding_size=128, window_size=5, iter_count=5)
+
+# Step 4: Get Embeddings for a Node
+node = 0  # Get embedding for node 0 (or any other node)
+embedding = model.wv[str(node)]  # Embeddings are stored in the model's word vectors
+
+# Display the embedding for the node
+print(f"Embedding for node {node}: {embedding}")
