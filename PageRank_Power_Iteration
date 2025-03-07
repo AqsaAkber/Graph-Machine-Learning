@@ -1,0 +1,28 @@
+import numpy as np
+def one_iter_pagerank(G, beta, r0, node_id):
+  # TODO: Implement this function that takes a nx.Graph, beta, r0 and node id.
+  # The return value r1 is one interation PageRank value for the input node.
+  # Please round r1 to 2 decimal places.
+        
+        r1 = 0
+        A = nx.adjacency_matrix(G).toarray()
+  ############# Your code here ############
+        A = A / A.sum(axis=0)
+        M = beta*A + (1-beta)*(1/N)*np.ones((N, N))
+
+        num_itr = 100;    
+        for i in range(num_itr):
+            r1 = np.dot(M, r0)
+            r0 = r1
+        #r11 = nx.pagerank()
+        #print(r11)
+  #########################################
+        return np.round(r1[node_id],2)
+    
+G = nx.karate_club_graph()
+N = G.number_of_nodes()
+beta = 0.8
+r0 = (1 / N)*np.ones(N)
+node = 0
+r1 = one_iter_pagerank(G, beta, r0, node)
+print("The PageRank value for node 0 after one iteration is {}".format(r1))
