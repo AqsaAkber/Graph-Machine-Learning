@@ -15,7 +15,7 @@ def one_iter_pagerank(G, beta, r0, node_id):
             r1 = np.dot(M, r0)
             r0 = r1
   #########################################
-        return np.round(r1[node_id],2)
+        return round(r1[node_id],2)
     
 G = nx.karate_club_graph()
 N = G.number_of_nodes()
