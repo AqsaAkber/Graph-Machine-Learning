@@ -14,8 +14,6 @@ def one_iter_pagerank(G, beta, r0, node_id):
         for i in range(num_itr):
             r1 = np.dot(M, r0)
             r0 = r1
-        #r11 = nx.pagerank()
-        #print(r11)
   #########################################
         return np.round(r1[node_id],2)
     
