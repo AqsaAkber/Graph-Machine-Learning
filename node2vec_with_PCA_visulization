@@ -1,0 +1,75 @@
+import networkx as nx
+import numpy as np
+import matplotlib.pyplot as plt
+from node2vec import Node2Vec
+from sklearn.decomposition import PCA
+
+def generate_random_graph(n, p):
+    """
+    Generate a random undirected graph with n nodes using the Erdős–Rényi model.
+    :param n: Number of nodes
+    :param p: Probability of edge creation
+    :return: A random graph G
+    """
+    G = nx.erdos_renyi_graph(n, p)
+    return G
+
+def train_node2vec(G, dimensions=64, walk_length=30, num_walks=200, p=1, q=1):
+    """
+    Train a Node2Vec model on the given graph.
+    :param G: NetworkX graph
+    :param dimensions: Size of node embeddings
+    :param walk_length: Number of nodes in each random walk
+    :param num_walks: Number of walks per node
+    :param p: Return parameter (controls BFS vs DFS)
+    :param q: In-out parameter (controls exploration)
+    :return: Trained Node2Vec model
+    """
+    node2vec = Node2Vec(G, dimensions=dimensions, walk_length=walk_length,
+                        num_walks=num_walks, p=p, q=q, workers=4)
+    model = node2vec.fit(window=10, min_count=1, batch_words=4)
+    return model
+
+def visualize_embeddings(model):
+    """
+    Visualize the learned embeddings using PCA.
+    :param model: Trained Node2Vec model
+    """
+    embeddings = np.array([model.wv[str(node)] for node in model.wv.index_to_key])
+    pca = PCA(n_components=2)
+    reduced_embeddings = pca.fit_transform(embeddings)
+    
+    plt.figure(figsize=(8, 6))
+    plt.scatter(reduced_embeddings[:, 0], reduced_embeddings[:, 1], color='blue')
+    
+    for i, node in enumerate(model.wv.index_to_key):
+        plt.annotate(node, (reduced_embeddings[i, 0], reduced_embeddings[i, 1]), fontsize=12)
+    
+    plt.title("Node2Vec Embeddings (PCA Reduced)")
+    plt.xlabel("Component 1")
+    plt.ylabel("Component 2")
+    plt.show()
+
+# Parameters
+num_nodes = 20   # Number of nodes in the graph
+edge_prob = 0.3  # Probability of edge formation
+
+# Generate a random graph
+G = generate_random_graph(num_nodes, edge_prob)
+
+# Train Node2Vec
+node2vec_model = train_node2vec(G)
+
+# Print learned embeddings for a few nodes
+print("Example Node Embeddings:")
+for node in list(G.nodes)[:5]:  # Print embeddings for first 5 nodes
+    print(f"Node {node}: {node2vec_model.wv[str(node)][:5]}...")
+
+# Visualize Embeddings
+visualize_embeddings(node2vec_model)
+
+# Draw the graph
+plt.figure(figsize=(8, 6))
+nx.draw(G, with_labels=True, node_color='lightblue', edge_color='gray', node_size=700)
+plt.title("Randomly Generated Graph")
+plt.show()
