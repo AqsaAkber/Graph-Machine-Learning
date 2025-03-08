@@ -1,0 +1,153 @@
+import torch
+import torch.nn.functional as F
+import networkx as nx
+import matplotlib.pyplot as plt
+import random
+from torch_geometric.data import Data
+from torch_geometric.nn import GCNConv
+from sklearn.metrics import roc_auc_score
+
+# 1️⃣ Generate a synthetic social network graph
+def create_graph(num_nodes=30, prob=0.15):
+    G = nx.erdos_renyi_graph(num_nodes, prob)  # Random graph model
+    edge_index = torch.tensor(list(G.edges), dtype=torch.long).t().contiguous()
+    x = torch.eye(num_nodes, dtype=torch.float)  # Identity matrix as node features
+    return G, Data(x=x, edge_index=edge_index)
+
+# 2️⃣ Split edges into train & test sets
+def train_test_split_edges(graph):
+    edges = list(graph.edges)
+    random.shuffle(edges)
+    
+    num_train = int(0.8 * len(edges))
+    train_edges = edges[:num_train]
+    test_edges = edges[num_train:]
+
+    # Generate negative samples for testing
+    non_edges = list(nx.non_edges(graph))
+    test_neg_edges = random.sample(non_edges, len(test_edges))
+
+    return train_edges, test_edges, test_neg_edges
+
+# 3️⃣ GCN Model for Link Prediction
+class GCNLinkPredictor(torch.nn.Module):
+    def __init__(self, in_channels, hidden_channels):
+        super().__init__()
+        self.conv1 = GCNConv(in_channels, hidden_channels)
+        self.conv2 = GCNConv(hidden_channels, hidden_channels)
+    
+    def encode(self, data):
+        x = F.relu(self.conv1(data.x, data.edge_index))
+        x = self.conv2(x, data.edge_index)
+        return x
+    
+    def decode(self, z, edge_index):
+        return (z[edge_index[0]] * z[edge_index[1]]).sum(dim=1)  # Dot product
+
+# 4️⃣ Training the Model
+def train(model, data, train_edges, epochs=200, lr=0.01):
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    
+    train_edge_index = torch.tensor(train_edges, dtype=torch.long).t().contiguous()
+    
+    for epoch in range(epochs):
+        model.train()
+        optimizer.zero_grad()
+        
+        z = model.encode(data)  # Get node embeddings
+        pred = model.decode(z, train_edge_index)  # Predict links
+        
+        labels = torch.ones(len(train_edges), dtype=torch.float)  # Positive labels
+        loss = F.binary_cross_entropy_with_logits(pred, labels)
+        
+        loss.backward()
+        optimizer.step()
+        
+        if (epoch + 1) % 50 == 0:
+            print(f"Epoch {epoch+1}/{epochs}, Loss: {loss.item():.4f}")
+
+# 5️⃣ Evaluate using AUC Score
+def evaluate(model, data, test_edges, test_neg_edges):
+    model.eval()
+    with torch.no_grad():
+        z = model.encode(data)
+        
+        # Predict for positive test edges
+        test_edge_index = torch.tensor(test_edges, dtype=torch.long).t().contiguous()
+        pos_preds = torch.sigmoid(model.decode(z, test_edge_index)).cpu().numpy()
+        
+        # Predict for negative test edges
+        neg_edge_index = torch.tensor(test_neg_edges, dtype=torch.long).t().contiguous()
+        neg_preds = torch.sigmoid(model.decode(z, neg_edge_index)).cpu().numpy()
+        
+        # Compute AUC
+        y_true = [1] * len(test_edges) + [0] * len(test_neg_edges)
+        y_scores = list(pos_preds) + list(neg_preds)
+        auc = roc_auc_score(y_true, y_scores)
+        
+        return auc
+
+# 6️⃣ Graph Visualization
+def visualize_graph(G, title="Social Network Graph", highlight_edges=None):
+    plt.figure(figsize=(8, 6))
+    pos = nx.spring_layout(G)  # Node positioning
+    
+    nx.draw(G, pos, with_labels=True, node_color='lightblue', edge_color='gray', node_size=500, font_size=10)
+    
+    # Highlight edges (e.g., predicted new links)
+    if highlight_edges:
+        nx.draw_networkx_edges(G, pos, edgelist=highlight_edges, edge_color='red', width=2)
+    
+    plt.title(title)
+    plt.show()
+
+# 7️⃣ Run the Full Pipeline
+if __name__ == "__main__":
+    # Create graph & convert to PyTorch Geometric format
+    G, data = create_graph()
+    
+    # Train-test split
+    train_edges, test_edges, test_neg_edges = train_test_split_edges(G)
+
+    # Visualize original graph
+    visualize_graph(G, "Original Social Network Graph")
+
+    # Initialize GCN model
+    model = GCNLinkPredictor(in_channels=data.x.shape[1], hidden_channels=16)
+    # This code demonstrates a link prediction task in social networks using a Graph Convolutional Network (GCN). Here's a brief explanation:
+
+#1. Graph Generation: A synthetic random graph is created using networkx, where nodes represent users and edges represent existing relationships.
+#2. Model Setup: A simple GCN model is defined using torch_geometric, which generates node embeddings by passing graph data through two graph convolution layers.
+#3. Link Prediction: The model is trained to predict missing links (edges) between nodes based on their features, using binary cross-entropy loss.
+#4. Evaluation: After training, the model's performance is evaluated using the AUC score (area under the curve) by comparing the predicted edges to actual test edges (both positive and negative).
+#5. Visualization: The graph is visualized before and after new predicted links are added. Predicted edges are highlighted in red.
+
+This code shows how to train a GCN for link prediction, evaluate it, and visualize the results with graph changes over time.
+    
+    # Train the model
+    print("\n🔄 Training GCN Model...")
+    train(model, data, train_edges)
+
+    # Evaluate on test data
+    auc_score = evaluate(model, data, test_edges, test_neg_edges)
+    print(f"\n✅ Test AUC Score: {auc_score:.4f}")
+
+    # Predict new links & visualize
+    z = model.encode(data)
+    
+    # Predict new edges based on trained model
+    predicted_edges = []
+    for u, v in test_edges:
+        # Predict probability of an edge between u and v
+        pred_score = model.decode(z, torch.tensor([[u, v]], dtype=torch.long).t()).item()
+        
+        if pred_score > 0.5:  # Threshold for predicting new edges
+            predicted_edges.append((u, v))
+
+    # Simulate adding new edges by showing the prediction
+    print("\nPredicted New Edges (Based on Model):", predicted_edges)
+
+    # Visualize predicted new links by adding them to the original graph
+    G_pred = G.copy()
+    G_pred.add_edges_from(predicted_edges)  # Add new predicted edges
+    visualize_graph(G_pred, "Social Network Graph After Predicted Link Addition", highlight_edges=predicted_edges)
