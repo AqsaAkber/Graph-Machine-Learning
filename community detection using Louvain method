@@ -1,23 +1,15 @@
-# install the library 
-pip install networkx torch torch-geometric community
-#A random graph is created using the Erdős–Rényi model from networkx, representing a social network.
-#Louvain Method: I uses the community package to apply the Louvain method to detect communities based on modularity optimization.
-#Visualization: The communities detected by the Louvain method are visualized using matplotlib and networkx.
-#PyTorch Geometric: The graph is converted to PyTorch Geometric format for use with Graph Neural Networks (GNNs).
-#GCN Model: A simple Graph Convolutional Network (GCN) is defined using GCNConv layers from PyTorch Geometric. The model predicts community assignments for each node.
-#Training: The GCN is trained using the Louvain method’s community labels as the ground truth (for demonstration).
-#Prediction and Visualization: After training, the model is used to predict communities, which are then visualized.
-#code starts here
-import networkx as nx
-import community as community_louvain
 import torch
 import torch_geometric
+import torch.nn.functional as F
 from torch_geometric.nn import GCNConv
-from torch_geometric.data import Data
+import networkx as nx
+import community as community_louvain
+from sklearn.cluster import KMeans
+from sklearn.decomposition import PCA
 import matplotlib.pyplot as plt
 
-# Create a sample social network (graph) using NetworkX
-G = nx.erdos_renyi_graph(100, 0.05)  # A random graph of 100 nodes and 5% edge probability
+# Create a sample graph (social network) using NetworkX
+G = nx.erdos_renyi_graph(100, 0.05)  # A random graph with 100 nodes and 5% edge probability
 
 # Visualization of the graph
 plt.figure(figsize=(8, 6))
@@ -25,61 +17,58 @@ nx.draw(G, with_labels=True, node_size=100, font_size=10)
 plt.title("Social Network (Random Graph)")
 plt.show()
 
-# Louvain method for community detection
+# Convert the NetworkX graph to PyTorch Geometric format
+def nx_to_torch_geometric(G):
+    edge_index = torch.tensor(list(G.edges), dtype=torch.long).t().contiguous()
+    x = torch.eye(G.number_of_nodes(), dtype=torch.float)  # Identity matrix as node features (simple example)
+    data = torch_geometric.data.Data(x=x, edge_index=edge_index)
+    return data
+
+data = nx_to_torch_geometric(G)
+
+# Get communities using the Louvain method
 def louvain_community_detection(G):
     partition = community_louvain.best_partition(G)
     return partition
 
-# Get communities using the Louvain method
 partition = louvain_community_detection(G)
-print("Louvain Method Community Partition:", partition)
+num_communities = len(set(partition.values()))
+print(f"Number of communities: {num_communities}")
 
-# Visualize communities with Louvain partition
-plt.figure(figsize=(8, 6))
-pos = nx.spring_layout(G)
-cmap = plt.cm.rainbow
-colors = [cmap(partition[node] / max(partition.values())) for node in G.nodes()]
-nx.draw(G, pos, node_color=colors, with_labels=True, node_size=100, font_size=10)
-plt.title("Communities Detected with Louvain")
-plt.show()
-
-# Prepare the graph data for GNN (Graph Neural Network) using PyTorch Geometric
-# Convert NetworkX graph to PyTorch Geometric format
-def nx_to_torch_geometric(G):
-    edge_index = torch.tensor(list(G.edges), dtype=torch.long).t().contiguous()
-    x = torch.eye(G.number_of_nodes(), dtype=torch.float)  # Identity matrix as node features (simple example)
-    data = Data(x=x, edge_index=edge_index)
-    return data
-
-# Get PyTorch Geometric graph data
-data = nx_to_torch_geometric(G)
-
-# Define a simple Graph Convolutional Network (GCN) for community detection
-class GCN(torch.nn.Module):
-    def __init__(self, in_channels, out_channels):
-        super(GCN, self).__init__()
-        self.conv1 = GCNConv(in_channels, 16)
-        self.conv2 = GCNConv(16, out_channels)
-
+# Define the GCN model
+class GCNModel(torch.nn.Module):
+    def __init__(self, in_channels, hidden_channels, out_channels):
+        super(GCNModel, self).__init__()
+        self.conv1 = GCNConv(in_channels, hidden_channels)
+        self.conv2 = GCNConv(hidden_channels, out_channels)  # Output layer matches the number of communities
+    
     def forward(self, data):
         x, edge_index = data.x, data.edge_index
-        x = torch.relu(self.conv1(x, edge_index))
-        x = self.conv2(x, edge_index)
+        x = F.relu(self.conv1(x, edge_index))
+        x = self.conv2(x, edge_index)  # Output from this layer
         return x
 
-# Initialize GCN model
-model = GCN(in_channels=G.number_of_nodes(), out_channels=4)  # 4 is an arbitrary number of clusters/communities
-optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
-criterion = torch.nn.CrossEntropyLoss()
+# Initialize the GCN model
+hidden_channels = 64
+model = GCNModel(in_channels=data.x.shape[1], hidden_channels=hidden_channels, out_channels=num_communities)
 
-# Training loop
+# Loss function and optimizer
+criterion = torch.nn.CrossEntropyLoss()
+optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
+
+# Training the model
 def train(model, data, epochs=100):
     for epoch in range(epochs):
         model.train()
         optimizer.zero_grad()
         out = model(data)
-        # Here, we use the Louvain method's partition as ground truth labels (as a placeholder)
-        labels = torch.tensor([partition[node] for node in data.x], dtype=torch.long)
+
+        # Get labels from Louvain partition (zero-indexed labels for CrossEntropyLoss)
+        labels = torch.tensor([partition[int(node)] for node in range(len(data.x))], dtype=torch.long)
+        
+        # Ensure labels are zero-indexed
+        labels = labels - labels.min()  # In case labels aren't zero-indexed
+        
         loss = criterion(out, labels)
         loss.backward()
         optimizer.step()
@@ -87,23 +76,28 @@ def train(model, data, epochs=100):
         if epoch % 10 == 0:
             print(f'Epoch {epoch+1}/{epochs}, Loss: {loss.item()}')
 
-# Train the model
 train(model, data)
 
-# Community detection using the trained GCN model
-def detect_communities_gcn(model, data):
-    model.eval()
-    out = model(data)
-    _, predicted = out.max(dim=1)
-    return predicted
+# After training, get the learned embeddings
+model.eval()
+embeddings = model(data)
 
-# Predict communities using GCN
-predicted_communities = detect_communities_gcn(model, data)
-print("Predicted Communities:", predicted_communities)
+# Use KMeans clustering to detect communities based on learned embeddings
+kmeans = KMeans(n_clusters=num_communities)
+kmeans.fit(embeddings.detach().numpy())
+labels = kmeans.labels_
 
-# Visualize the GCN's predicted communities
+# Visualize the communities using PCA (dimensionality reduction)
+pca = PCA(n_components=2)
+reduced_embeddings = pca.fit_transform(embeddings.detach().numpy())
+
 plt.figure(figsize=(8, 6))
-colors = [predicted_communities[node].item() for node in G.nodes()]
-nx.draw(G, pos, node_color=colors, with_labels=True, node_size=100, font_size=10, cmap=plt.cm.rainbow)
-plt.title("Communities Detected by GCN")
+for i in range(num_communities):
+    plt.scatter(reduced_embeddings[labels == i, 0], reduced_embeddings[labels == i, 1], label=f'Community {i+1}')
+plt.title("Community Detection Using GCN and KMeans Clustering")
+plt.legend()
 plt.show()
+
+# Print predicted communities for each node
+print("Predicted Communities (KMeans labels):", labels)
+
