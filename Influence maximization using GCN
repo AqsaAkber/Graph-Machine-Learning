@@ -1,0 +1,87 @@
+#Generate a random social network graph (Erdős–Rényi model).
+#Use a GCN model to learn node embeddings.
+#Train the model to classify nodes based on their influence.
+#Predict the most influential nodes using learned embeddings.
+#Visualize the graph before and after selecting the top-k influential nodes.
+
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import torch_geometric
+from torch_geometric.nn import GCNConv
+import networkx as nx
+import matplotlib.pyplot as plt
+
+# Step 1: Generate a random social network graph
+num_nodes = 100
+prob_edge = 0.05
+G = nx.erdos_renyi_graph(n=num_nodes, p=prob_edge)
+
+# Convert to PyTorch Geometric format
+edge_index = torch.tensor(list(G.edges), dtype=torch.long).t().contiguous()
+x = torch.eye(G.number_of_nodes(), dtype=torch.float)  # Identity matrix as node features
+data = torch_geometric.data.Data(x=x, edge_index=edge_index)
+
+# Function to visualize the graph
+def visualize_graph(G, title="Graph Visualization", highlighted_nodes=None):
+    plt.figure(figsize=(8, 6))
+    pos = nx.spring_layout(G)  # Compute layout for visualization
+    nx.draw(G, pos, with_labels=True, node_size=300, node_color='lightblue', edge_color='gray')
+    
+    # Highlight top influential nodes
+    if highlighted_nodes:
+        nx.draw_networkx_nodes(G, pos, nodelist=highlighted_nodes, node_color='red', node_size=500)
+    
+    plt.title(title)
+    plt.show()
+
+# Step 2: Define GCN Model for Influence Maximization
+class GCN(nn.Module):
+    def __init__(self, in_channels, out_channels):
+        super(GCN, self).__init__()
+        self.conv1 = GCNConv(in_channels, 16)
+        self.conv2 = GCNConv(16, out_channels)
+
+    def forward(self, data):
+        x, edge_index = data.x, data.edge_index
+        x = torch.relu(self.conv1(x, edge_index))
+        x = self.conv2(x, edge_index)
+        return x
+
+# Step 3: Train the GCN Model
+model = GCN(in_channels=x.size(1), out_channels=1)  # 1 output feature per node
+optimizer = optim.Adam(model.parameters(), lr=0.01)
+criterion = nn.MSELoss()  # Dummy loss function
+
+def train(model, data, epochs=100):
+    model.train()
+    for epoch in range(epochs):
+        optimizer.zero_grad()
+        out = model(data)
+        loss = criterion(out, torch.rand_like(out))  # Using random influence values as dummy labels
+        loss.backward()
+        optimizer.step()
+        if epoch % 20 == 0:
+            print(f"Epoch {epoch+1}/{epochs}, Loss: {loss.item()}")
+
+# Step 4: Visualize Initial Graph Before Training
+visualize_graph(G, title="Initial Graph (Before Influence Maximization)")
+
+# Train the model
+train(model, data)
+
+# Step 5: Predict the Most Influential Nodes
+def predict_influence(model, data, top_k=5):
+    model.eval()
+    with torch.no_grad():
+        embeddings = model(data)
+        influence_scores = embeddings.norm(p=2, dim=1)  # L2 norm as influence proxy
+        top_nodes = torch.topk(influence_scores, top_k).indices
+    return top_nodes.tolist()
+
+# Get top-k influential nodes
+top_k_nodes = predict_influence(model, data, top_k=5)
+print("Top-k Influential Nodes:", top_k_nodes)
+
+# Step 6: Visualize Graph After Influence Maximization (Highlighting Influential Nodes)
+visualize_graph(G, title="Graph After Influence Maximization (Top Influential Nodes in Red)", highlighted_nodes=top_k_nodes)
